@@ -13,8 +13,8 @@ services:
     ports:
       - "127.0.0.1:5432:5432"
     healthcheck:
-      # POSTGRES_DB подставляется из env контейнера (по умолчанию hvac)
-      test: ["CMD-SHELL", "pg_isready -U postgres -d $$POSTGRES_DB"]
+      # POSTGRES_USER и POSTGRES_DB подставляются из env контейнера
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -76,8 +76,13 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD in .env}
       GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://127.0.0.1:3000/}
       TZ: ${TZ:-Europe/Moscow}
+      # Передаём credentials БД для auto-provisioning datasource
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-hvac}
     volumes:
       - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
     networks:
       - hvac-net
 

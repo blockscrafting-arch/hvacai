@@ -18,6 +18,9 @@ SELECT create_hypertable('sensor_readings', 'time', if_not_exists => TRUE, chunk
 
 CREATE INDEX IF NOT EXISTS idx_sensor_readings_sensor_time ON sensor_readings (sensor_id, time DESC);
 
+-- Retention policy: автоудаление данных старше 90 дней (TimescaleDB background worker)
+SELECT add_retention_policy('sensor_readings', INTERVAL '90 days', if_not_exists => TRUE);
+
 -- Решения AI-агента
 CREATE TABLE IF NOT EXISTS ai_decisions (
   id           SERIAL PRIMARY KEY,
