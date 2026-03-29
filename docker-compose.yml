@@ -1,0 +1,110 @@
+services:
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: hvac-timescaledb
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-hvac}
+    volumes:
+      - timescale-data:/var/lib/postgresql/data
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/01-hvac-init.sql:ro
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      # POSTGRES_DB подставляется из env контейнера (по умолчанию hvac)
+      test: ["CMD-SHELL", "pg_isready -U postgres -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - hvac-net
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: hvac-mosquitto
+    restart: unless-stopped
+    volumes:
+      - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto-data:/mosquitto/data
+    ports:
+      - "127.0.0.1:1883:1883"
+      - "127.0.0.1:9001:9001"
+    networks:
+      - hvac-net
+
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:latest
+    container_name: hvac-n8n
+    restart: unless-stopped
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      mosquitto:
+        condition: service_started
+    ports:
+      - "5678:5678"
+    environment:
+      TZ: ${TZ:-Europe/Moscow}
+      GENERIC_TIMEZONE: ${GENERIC_TIMEZONE:-Europe/Moscow}
+      N8N_HOST: ${N8N_HOST:-0.0.0.0}
+      N8N_PORT: ${N8N_PORT:-5678}
+      N8N_PROTOCOL: ${N8N_PROTOCOL:-http}
+      N8N_PUBLIC_URL: ${N8N_PUBLIC_URL:-http://127.0.0.1:5678/}
+      WEBHOOK_URL: ${N8N_PUBLIC_URL:-http://127.0.0.1:5678/}
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?set N8N_ENCRYPTION_KEY in .env (openssl rand -hex 32)}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      # Ссылка в Telegram: должен быть тот же хост, что у заказчика в браузере (не 127.0.0.1 с телефона)
+      GRAFANA_URL: ${GRAFANA_URL:-http://127.0.0.1:3000/d/hvac}
+    volumes:
+      - n8n-data:/home/node/.n8n
+    networks:
+      - hvac-net
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: hvac-grafana
+    restart: unless-stopped
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD in .env}
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://127.0.0.1:3000/}
+      TZ: ${TZ:-Europe/Moscow}
+    volumes:
+      - grafana-data:/var/lib/grafana
+    networks:
+      - hvac-net
+
+  simulator:
+    build:
+      context: ./simulator
+      dockerfile: Dockerfile
+    image: hvac-simulator:local
+    container_name: hvac-simulator
+    restart: unless-stopped
+    depends_on:
+      mosquitto:
+        condition: service_started
+    environment:
+      MQTT_HOST: mosquitto
+      MQTT_PORT: "1883"
+      MQTT_TOPIC: hvac/snapshot
+      PUBLISH_INTERVAL_SEC: "5"
+    networks:
+      - hvac-net
+
+volumes:
+  timescale-data:
+  mosquitto-data:
+  n8n-data:
+  grafana-data:
+
+networks:
+  hvac-net:
+    driver: bridge

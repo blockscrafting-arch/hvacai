@@ -1,0 +1,20 @@
+.env
+*.log
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Markdown — не в репозиторий
+*.md
+**/*.md
+
+# Cursor / IDE
+.cursor/
+.cursorrules
+.cursorignore
+**/.cursor/**
+.cursor/**
+
+# Agents (если появятся внутри проекта)
+.agents/
