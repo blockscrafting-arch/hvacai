@@ -4,10 +4,12 @@ datasources:
   - name: TimescaleDB
     type: postgres
     url: timescaledb:5432
-    database: ${POSTGRES_DB}
-    user: ${POSTGRES_USER}
+    # Явные значения: Grafana не всегда подставляет ${VAR} из env в provisioning (пустой database → ошибка в панелях)
+    database: hvac
+    user: postgres
     secureJsonData:
-      password: ${POSTGRES_PASSWORD}
+      # Пароль из env контейнера grafana (см. docker-compose)
+      password: $POSTGRES_PASSWORD
     jsonData:
       sslmode: disable
       postgresVersion: 1600
