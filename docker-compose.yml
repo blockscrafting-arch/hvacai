@@ -43,8 +43,7 @@ services:
         condition: service_healthy
       mosquitto:
         condition: service_started
-    ports:
-      - "5678:5678"
+    # Доступ снаружи только через Caddy (HTTPS)
     environment:
       TZ: ${TZ:-Europe/Moscow}
       GENERIC_TIMEZONE: ${GENERIC_TIMEZONE:-Europe/Moscow}
@@ -53,6 +52,8 @@ services:
       N8N_PROTOCOL: ${N8N_PROTOCOL:-http}
       N8N_PUBLIC_URL: ${N8N_PUBLIC_URL:-http://127.0.0.1:5678/}
       WEBHOOK_URL: ${N8N_PUBLIC_URL:-http://127.0.0.1:5678/}
+      # За Caddy один hop; без прокси в .env можно задать 0
+      N8N_PROXY_HOPS: ${N8N_PROXY_HOPS:-1}
       N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?set N8N_ENCRYPTION_KEY in .env (openssl rand -hex 32)}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
       # Ссылка в Telegram: должен быть тот же хост, что у заказчика в браузере (не 127.0.0.1 с телефона)
@@ -69,8 +70,7 @@ services:
     depends_on:
       timescaledb:
         condition: service_healthy
-    ports:
-      - "3000:3000"
+    # Доступ снаружи только через Caddy (HTTPS)
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD in .env}
@@ -83,6 +83,26 @@ services:
     volumes:
       - grafana-data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    networks:
+      - hvac-net
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: hvac-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      n8n:
+        condition: service_started
+      grafana:
+        condition: service_started
     networks:
       - hvac-net
 
@@ -109,6 +129,8 @@ volumes:
   mosquitto-data:
   n8n-data:
   grafana-data:
+  caddy-data:
+  caddy-config:
 
 networks:
   hvac-net:

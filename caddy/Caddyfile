@@ -1,0 +1,18 @@
+# Reverse proxy + автоматический HTTPS (Let's Encrypt).
+# Перед запуском: A-записи n8n.petushkevich.ru и grafana.petushkevich.ru → IP сервера.
+# Фаервол: открыть 80/tcp и 443/tcp (и при желании 443/udp для HTTP/3).
+#
+# Опционально — глобально для уведомлений об истечении сертификата:
+# {
+#   email admin@petushkevich.ru
+# }
+
+n8n.petushkevich.ru {
+	reverse_proxy n8n:5678 {
+		flush_interval -1
+	}
+}
+
+grafana.petushkevich.ru {
+	reverse_proxy grafana:3000
+}
