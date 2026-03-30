@@ -1,5 +1,10 @@
 apiVersion: 1
 
+# Старый datasource без uid ломает панели с ссылкой uid: tsdb-hvac — удаляем и создаём заново при старте Grafana
+deleteDatasources:
+  - name: TimescaleDB
+    orgId: 1
+
 datasources:
   - name: TimescaleDB
     uid: tsdb-hvac
