@@ -2,6 +2,7 @@ apiVersion: 1
 
 datasources:
   - name: TimescaleDB
+    uid: tsdb-hvac
     type: postgres
     url: timescaledb:5432
     # Явные значения: Grafana не всегда подставляет ${VAR} из env в provisioning (пустой database → ошибка в панелях)
