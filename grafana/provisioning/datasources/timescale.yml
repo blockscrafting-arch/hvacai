@@ -10,13 +10,14 @@ datasources:
     uid: tsdb-hvac
     type: postgres
     url: timescaledb:5432
-    # Явные значения: Grafana не всегда подставляет ${VAR} из env в provisioning (пустой database → ошибка в панелях)
+    # Имя БД дублируем: в актуальных Grafana для Postgres «default database» берётся из jsonData.database (см. оф. пример provisioning)
     database: hvac
     user: postgres
     secureJsonData:
       # Пароль из env контейнера grafana (см. docker-compose)
       password: $POSTGRES_PASSWORD
     jsonData:
+      database: hvac
       sslmode: disable
       postgresVersion: 1600
       timescaledb: true
