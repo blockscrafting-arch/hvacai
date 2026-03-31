@@ -1,7 +1,7 @@
 {
   "name": "HVAC AI — цех нитроаммофоски (КУЛТЕК CTK CH SL34M Ex, R22)",
   "meta": {
-    "description": "План: MQTT hvac/# → валидация → INSERT sensor_readings → окно 30с → AI Agent GPT-4o → INSERT ai_decisions → Switch → Telegram (3 уровня + Grafana) + MQTT. Проверено по n8n docs (Context7): Chat Model обязателен; с n8n 1.65.0 отдельный Tool не обязателен.",
+    "description": "План: MQTT hvac/# → парсинг + ruleSeverity → sensor_readings; только warning/critical → окно 120с → AI (gpt-4o-mini) → ai_decisions → Switch → Telegram + MQTT.",
     "templateCredsSetupCompleted": false,
     "minN8nVersion": "1.65.0",
     "sqlSchema": "sql/init.sql"
@@ -13,7 +13,7 @@
   "nodes": [
     {
       "parameters": {
-        "content": "## HVAC AI — ОВК нитроаммофоски (план диплома)\n\n**Цепочка:** `MQTT Trigger` → `Разбор + пороги` → **параллельно:** `Развернуть сенсоры` → `PostgreSQL sensor_readings` **и** `Окно 30 сек для AI` → `AI Agent` → `Разбор ответа` → **параллельно:** `PostgreSQL ai_decisions` **и** `Switch` → Telegram / MQTT.\n\n### Env\n- **TELEGRAM_CHAT_ID** — чат алертов.\n- **GRAFANA_URL** — ссылка в Telegram (по умолчанию в тексте — localhost:3000/d/hvac).\n\n### БД\nВыполните **`sql/init.sql`** в TimescaleDB, создайте credential **Postgres TimescaleDB**.\n\n### n8n docs (Context7)\n- AI Agent: обязателен **Chat Model**; Tool — не обязателен с **1.65.0**.\n- MQTT publish: topic + опция отправки payload.\n- Postgres: Execute Query + **Query Parameters** (`$1`, `$2`, …).\n",
+        "content": "## HVAC AI — ОВК нитроаммофоски (план диплома)\n\n**Цепочка:** `MQTT Trigger` → `Разбор + пороги` → **параллельно:** сенсоры в БД **и** `К AI только при отклонении` → `Окно 120 сек` → `AI Agent` → `Разбор ответа` → **параллельно:** `PostgreSQL ai_decisions` **и** `Switch` → Telegram / MQTT.\n\n### Env\n- **TELEGRAM_CHAT_ID** — чат алертов.\n- **GRAFANA_URL** — ссылка в Telegram (по умолчанию в тексте — localhost:3000/d/hvac).\n\n### БД\nВыполните **`sql/init.sql`** в TimescaleDB, создайте credential **Postgres TimescaleDB**.\n\n### n8n docs (Context7)\n- AI Agent: обязателен **Chat Model**; Tool — не обязателен с **1.65.0**.\n- MQTT publish: topic + опция отправки payload.\n- Postgres: Execute Query + **Query Parameters** (`$1`, `$2`, …).\n",
         "height": 560,
         "width": 460,
         "color": 4
@@ -22,7 +22,10 @@
       "name": "Инструкция",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
-      "position": [-1180, -240]
+      "position": [
+        -1180,
+        -240
+      ]
     },
     {
       "parameters": {
@@ -33,7 +36,10 @@
       "name": "MQTT Trigger",
       "type": "n8n-nodes-base.mqttTrigger",
       "typeVersion": 1,
-      "position": [-760, 220],
+      "position": [
+        -760,
+        220
+      ],
       "credentials": {
         "mqtt": {
           "name": "MQTT Mosquitto"
@@ -42,13 +48,16 @@
     },
     {
       "parameters": {
-        "jsCode": "/**\n * Пороги по плану (СанПиН IIб, ГОСТ 30494, паспорт КУЛТЕК R22) + разбор MQTT.\n */\n\nconst THRESHOLDS = {\n  room: {\n    temp_c_range: [10, 40],\n    temp_c_comfort_cold: [16, 22],\n    temp_c_comfort_warm: [18, 26],\n    temp_warning_below: 16,\n    temp_warning_above: 26,\n    temp_critical_below: 14,\n    temp_critical_above: 30,\n    rh_pct_range: [10, 95],\n    rh_pct_norm: [15, 75],\n    rh_warning_below: 15,\n    rh_warning_above: 75,\n    rh_critical_below: 10,\n    rh_critical_above: 85,\n    co2_ppm_comfort: 1000,\n    co2_ppm_warning: 1400,\n    co2_ppm_critical: 2000,\n    air_speed_ms_norm: [0.1, 0.4],\n    air_speed_ms_warning_above: 0.5,\n  },\n  chiller_r22: {\n    t_evap_c_range: [-20, 5],\n    t_evap_c_nominal_c: -7.5,\n    t_evap_warning_below: -15,\n    t_evap_warning_above: 2,\n    p_suction_bar_abs_range: [1.0, 8.0],\n    p_suction_bar_abs_nominal: 3.87,\n    p_discharge_bar_abs_range: [8.0, 25.0],\n    p_discharge_bar_abs_nominal: 15.34,\n    p_suction_warn_below: 2.5,\n    p_suction_critical_below: 1.5,\n    p_discharge_warn_above: 20,\n    p_discharge_critical_above: 25,\n    superheat_k_range: [0, 25],\n    superheat_k_norm: [5, 10],\n    superheat_warn_below: 3,\n    superheat_warn_above: 15,\n    superheat_crit_below: 1,\n    superheat_crit_above: 20,\n    t_discharge_c_range: [40, 160],\n    t_discharge_norm: [60, 100],\n    t_discharge_warn_c: 120,\n    t_discharge_critical_c: 135,\n    t_oil_c_range: [20, 80],\n    t_oil_norm: [40, 60],\n    t_oil_warn_c: 65,\n    t_oil_critical_c: 75,\n    oil_dp_bar_range: [0, 3.0],\n    oil_dp_norm: [1.25, 1.65],\n    oil_dp_warn_below: 1.1,\n    oil_dp_critical_below: 0.65,\n  },\n  coolant_nh3_20pct: {\n    t_in_c_range: [-5, 20],\n    t_in_norm: [10, 14],\n    t_out_c_range: [-10, 15],\n    t_out_nominal: [-7.5, 0.1],\n    // 20% р-р NH3 замерзает при ~-36C; -10C — аварийная защита технологического контура\n    t_out_critical_below_c: -10,\n    flow_m3h_range: [0, 300],\n    flow_m3h_nominal_max: 250,\n    flow_warn_below: 100,\n    pressure_mpa_range: [0, 2.0],\n    pressure_mpa_nominal_max: 1.45,\n    pressure_warn_above_mpa: 1.3,\n  },\n  condenser_water: { t_in_c_nominal: 26, t_out_c_nominal: 33 },\n  sanpin: {\n    nh3_mg_m3_max: 20,\n    ref: 'СанПиН 1.2.3685-21 табл. 2.1 (NH3), табл. 5.2 кат. IIб',\n  },\n};\n\nconst META = {\n  equipment: 'КУЛТЕК CTK CH SL34M Ex',\n  refrigerant: 'R22',\n  coolant: '20% водный раствор аммиака',\n  ex_marking: '1 Ex d IIB T4',\n};\n\nconst raw = $input.first().json;\nlet payload;\ntry {\n  if (raw.message !== undefined && raw.message !== null) {\n    payload = typeof raw.message === 'string' ? JSON.parse(raw.message) : raw.message;\n  } else {\n    payload = raw;\n  }\n} catch (e) {\n  return [\n    {\n      json: {\n        parseError: String(e),\n        topic: raw.topic,\n        raw,\n        thresholds: THRESHOLDS,\n        meta: META,\n      },\n    },\n  ];\n}\n\nreturn [\n  {\n    json: {\n      topic: raw.topic || payload.topic || 'unknown',\n      receivedAt: new Date().toISOString(),\n      sensorPayload: payload,\n      thresholds: THRESHOLDS,\n      meta: META,\n    },\n  },\n];"
+        "jsCode": "/**\n * Пороги по плану (СанПиН IIб, ГОСТ 30494, паспорт КУЛТЕК R22) + разбор MQTT.\n */\n\nconst THRESHOLDS = {\n  room: {\n    temp_c_range: [10, 40],\n    temp_c_comfort_cold: [16, 22],\n    temp_c_comfort_warm: [18, 26],\n    temp_warning_below: 16,\n    temp_warning_above: 26,\n    temp_critical_below: 14,\n    temp_critical_above: 30,\n    rh_pct_range: [10, 95],\n    rh_pct_norm: [15, 75],\n    rh_warning_below: 15,\n    rh_warning_above: 75,\n    rh_critical_below: 10,\n    rh_critical_above: 85,\n    co2_ppm_comfort: 1000,\n    co2_ppm_warning: 1400,\n    co2_ppm_critical: 2000,\n    air_speed_ms_norm: [0.1, 0.4],\n    air_speed_ms_warning_above: 0.5,\n  },\n  chiller_r22: {\n    t_evap_c_range: [-20, 5],\n    t_evap_c_nominal_c: -7.5,\n    t_evap_warning_below: -15,\n    t_evap_warning_above: 2,\n    p_suction_bar_abs_range: [1.0, 8.0],\n    p_suction_bar_abs_nominal: 3.87,\n    p_discharge_bar_abs_range: [8.0, 25.0],\n    p_discharge_bar_abs_nominal: 15.34,\n    p_suction_warn_below: 2.5,\n    p_suction_critical_below: 1.5,\n    p_discharge_warn_above: 20,\n    p_discharge_critical_above: 25,\n    superheat_k_range: [0, 25],\n    superheat_k_norm: [5, 10],\n    superheat_warn_below: 3,\n    superheat_warn_above: 15,\n    superheat_crit_below: 1,\n    superheat_crit_above: 20,\n    t_discharge_c_range: [40, 160],\n    t_discharge_norm: [60, 100],\n    t_discharge_warn_c: 120,\n    t_discharge_critical_c: 135,\n    t_oil_c_range: [20, 80],\n    t_oil_norm: [40, 60],\n    t_oil_warn_c: 65,\n    t_oil_critical_c: 75,\n    oil_dp_bar_range: [0, 3.0],\n    oil_dp_norm: [1.25, 1.65],\n    oil_dp_warn_below: 1.1,\n    oil_dp_critical_below: 0.65,\n  },\n  coolant_nh3_20pct: {\n    t_in_c_range: [-5, 20],\n    t_in_norm: [10, 14],\n    t_out_c_range: [-10, 15],\n    t_out_nominal: [-7.5, 0.1],\n    // 20% р-р NH3 замерзает при ~-36C; -10C — аварийная защита технологического контура\n    t_out_critical_below_c: -10,\n    flow_m3h_range: [0, 300],\n    flow_m3h_nominal_max: 250,\n    flow_warn_below: 100,\n    pressure_mpa_range: [0, 2.0],\n    pressure_mpa_nominal_max: 1.45,\n    pressure_warn_above_mpa: 1.3,\n  },\n  condenser_water: { t_in_c_nominal: 26, t_out_c_nominal: 33 },\n  sanpin: {\n    nh3_mg_m3_max: 20,\n    ref: 'СанПиН 1.2.3685-21 табл. 2.1 (NH3), табл. 5.2 кат. IIб',\n  },\n};\n\nfunction evaluateRuleSeverity(payload, H) {\n  let sev = 'normal';\n  const issues = [];\n  function bump(level, msg) {\n    issues.push(msg);\n    if (level === 'critical') sev = 'critical';\n    else if (level === 'warning' && sev !== 'critical') sev = 'warning';\n  }\n  const room = payload.room || {};\n  const ch = payload.chiller || {};\n  const nh3 = payload.coolant || {};\n  const cond = payload.condenser || {};\n  const R = H.room;\n  const C = H.chiller_r22;\n  const N = H.coolant_nh3_20pct;\n\n  if (room.temp_c != null) {\n    const t = Number(room.temp_c);\n    if (!Number.isNaN(t)) {\n      if (t < R.temp_critical_below || t > R.temp_critical_above) bump('critical', 't помещения ' + t + '°C');\n      else if (t < R.temp_warning_below || t > R.temp_warning_above) bump('warning', 't помещения ' + t + '°C вне комфорта');\n    }\n  }\n  if (room.rh_pct != null) {\n    const rh = Number(room.rh_pct);\n    if (!Number.isNaN(rh)) {\n      if (rh < R.rh_critical_below || rh > R.rh_critical_above) bump('critical', 'RH ' + rh + '%');\n      else if (rh < R.rh_warning_below || rh > R.rh_warning_above) bump('warning', 'RH ' + rh + '%');\n    }\n  }\n  if (room.co2_ppm != null) {\n    const co2 = Number(room.co2_ppm);\n    if (!Number.isNaN(co2)) {\n      if (co2 >= R.co2_ppm_critical) bump('critical', 'CO2 ' + co2 + ' ppm');\n      else if (co2 >= R.co2_ppm_warning) bump('warning', 'CO2 ' + co2 + ' ppm');\n    }\n  }\n  if (room.air_speed_ms != null) {\n    const v = Number(room.air_speed_ms);\n    if (!Number.isNaN(v) && v > R.air_speed_ms_warning_above) bump('warning', 'скорость воздуха ' + v + ' м/с');\n  }\n\n  if (ch.t_evap_c != null) {\n    const te = Number(ch.t_evap_c);\n    if (!Number.isNaN(te)) {\n      if (te < C.t_evap_c_range[0] || te > C.t_evap_c_range[1]) bump('critical', 'T исп ' + te + '°C вне диапазона');\n      else if (te < C.t_evap_warning_below || te > C.t_evap_warning_above) bump('warning', 'T исп ' + te + '°C');\n    }\n  }\n  if (ch.p_suction_bar_abs != null) {\n    const p = Number(ch.p_suction_bar_abs);\n    if (!Number.isNaN(p)) {\n      if (p < C.p_suction_bar_abs_range[0] || p > C.p_suction_bar_abs_range[1]) bump('critical', 'P всас ' + p + ' бар вне диапазона');\n      else if (p < C.p_suction_critical_below) bump('critical', 'P всас ' + p + ' бар');\n      else if (p < C.p_suction_warn_below) bump('warning', 'P всас ' + p + ' бар');\n    }\n  }\n  if (ch.p_discharge_bar_abs != null) {\n    const p = Number(ch.p_discharge_bar_abs);\n    if (!Number.isNaN(p)) {\n      if (p < C.p_discharge_bar_abs_range[0] || p > C.p_discharge_bar_abs_range[1]) bump('critical', 'P нагн ' + p + ' бар вне диапазона');\n      else if (p >= C.p_discharge_critical_above) bump('critical', 'P нагн ' + p + ' бар');\n      else if (p >= C.p_discharge_warn_above) bump('warning', 'P нагн ' + p + ' бар');\n    }\n  }\n  if (ch.superheat_k != null) {\n    const sh = Number(ch.superheat_k);\n    if (!Number.isNaN(sh)) {\n      if (sh < C.superheat_crit_below || sh > C.superheat_crit_above) bump('critical', 'перегрев ' + sh + ' K');\n      else if (sh < C.superheat_warn_below || sh > C.superheat_warn_above) bump('warning', 'перегрев ' + sh + ' K');\n    }\n  }\n  if (ch.t_discharge_c != null) {\n    const td = Number(ch.t_discharge_c);\n    if (!Number.isNaN(td)) {\n      if (td >= C.t_discharge_critical_c) bump('critical', 'T нагн ' + td + '°C');\n      else if (td >= C.t_discharge_warn_c) bump('warning', 'T нагн ' + td + '°C');\n    }\n  }\n  if (ch.t_oil_c != null) {\n    const to = Number(ch.t_oil_c);\n    if (!Number.isNaN(to)) {\n      if (to >= C.t_oil_critical_c) bump('critical', 'T масла ' + to + '°C');\n      else if (to >= C.t_oil_warn_c) bump('warning', 'T масла ' + to + '°C');\n    }\n  }\n  if (ch.oil_dp_bar != null) {\n    const od = Number(ch.oil_dp_bar);\n    if (!Number.isNaN(od)) {\n      if (od < C.oil_dp_critical_below) bump('critical', 'ΔP масла ' + od + ' бар');\n      else if (od < C.oil_dp_warn_below) bump('warning', 'ΔP масла ' + od + ' бар');\n    }\n  }\n\n  const tin = nh3.t_in_c ?? nh3.coolant_t_in;\n  const tout = nh3.t_out_c ?? nh3.coolant_t_out;\n  const flow = nh3.flow_m3h ?? nh3.coolant_flow;\n  const press = nh3.pressure_mpa ?? nh3.coolant_pressure;\n  if (tout != null) {\n    const t = Number(tout);\n    if (!Number.isNaN(t)) {\n      if (t < N.t_out_critical_below_c) bump('critical', 'T вых хладоносителя ' + t + '°C');\n      else if (t < N.t_out_c_range[0] || t > N.t_out_c_range[1]) bump('warning', 'T вых хладоносителя ' + t + '°C');\n    }\n  }\n  if (tin != null) {\n    const t = Number(tin);\n    if (!Number.isNaN(t) && (t < N.t_in_c_range[0] || t > N.t_in_c_range[1])) bump('warning', 'T вх хладоносителя ' + t + '°C');\n  }\n  if (flow != null) {\n    const f = Number(flow);\n    if (!Number.isNaN(f) && f < N.flow_warn_below) bump('warning', 'расход ' + f + ' м³/ч');\n  }\n  if (press != null) {\n    const pr = Number(press);\n    if (!Number.isNaN(pr) && pr > N.pressure_warn_above_mpa) bump('warning', 'давление ' + pr + ' МПа');\n  }\n  if (cond.t_out_c != null && H.condenser_water) {\n    const t = Number(cond.t_out_c);\n    if (!Number.isNaN(t) && t > H.condenser_water.t_out_c_nominal + 5) bump('warning', 'T вых конденсатора ' + t + '°C');\n  }\n  return { ruleSeverity: sev, ruleIssues: issues, ruleSummary: issues.length ? issues.join('; ') : 'в пределах правил' };\n}\n\n\nconst META = {\n  equipment: 'КУЛТЕК CTK CH SL34M Ex',\n  refrigerant: 'R22',\n  coolant: '20% водный раствор аммиака',\n  ex_marking: '1 Ex d IIB T4',\n};\n\nconst raw = $input.first().json;\nlet payload;\ntry {\n  if (raw.message !== undefined && raw.message !== null) {\n    payload = typeof raw.message === 'string' ? JSON.parse(raw.message) : raw.message;\n  } else {\n    payload = raw;\n  }\n} catch (e) {\n  return [\n    {\n      json: {\n        parseError: String(e),\n        topic: raw.topic,\n        raw,\n        thresholds: THRESHOLDS,\n        meta: META,\n      },\n    },\n  ];\n}\n\nconst ruleEval = evaluateRuleSeverity(payload, THRESHOLDS);\nreturn [\n  {\n    json: {\n      topic: raw.topic || payload.topic || 'unknown',\n      receivedAt: new Date().toISOString(),\n      sensorPayload: payload,\n      thresholds: THRESHOLDS,\n      meta: META,\n      ruleSeverity: ruleEval.ruleSeverity,\n      ruleIssues: ruleEval.ruleIssues,\n      ruleSummary: ruleEval.ruleSummary,\n    },\n  },\n];"
       },
       "id": "node-parse-thresholds",
       "name": "Разбор MQTT + пороги",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [-500, 220]
+      "position": [
+        -500,
+        220
+      ]
     },
     {
       "parameters": {
@@ -58,7 +67,10 @@
       "name": "Развернуть сенсоры в строки БД",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [-500, 420]
+      "position": [
+        -500,
+        420
+      ]
     },
     {
       "parameters": {
@@ -73,7 +85,10 @@
       "name": "PostgreSQL sensor_readings",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
-      "position": [-280, 420],
+      "position": [
+        -280,
+        420
+      ],
       "credentials": {
         "postgres": {
           "name": "Postgres TimescaleDB"
@@ -82,18 +97,21 @@
     },
     {
       "parameters": {
-        "jsCode": "// Не передавать AI невалидные сообщения (parseError из предыдущей ноды)\nconst base = $input.first().json;\nif (base.parseError) return [];\n\ntry {\n  const g = $getWorkflowStaticData('global');\n  const now = Date.now();\n  if (!g.lastAiMs) g.lastAiMs = 0;\n  if (now - g.lastAiMs < 30000) return [];\n  g.lastAiMs = now;\n} catch (e) {\n  // Если static data недоступен, AI вызывается на каждое сообщение\n}\nreturn $input.all();"
+        "jsCode": "// Не передавать AI невалидные сообщения (parseError из предыдущей ноды)\nconst base = $input.first().json;\nif (base.parseError) return [];\n\ntry {\n  const g = $getWorkflowStaticData('global');\n  const now = Date.now();\n  if (!g.lastAiMs) g.lastAiMs = 0;\n  if (now - g.lastAiMs < 120000) return [];\n  g.lastAiMs = now;\n} catch (e) {\n  // Если static data недоступен, AI вызывается на каждое сообщение (редко: только после gate отклонений)\n}\nreturn $input.all();"
       },
       "id": "node-throttle-30s",
-      "name": "Окно 30 сек для AI",
+      "name": "Окно 120 сек для AI",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [-380, 220]
+      "position": [
+        -380,
+        220
+      ]
     },
     {
       "parameters": {
         "promptType": "define",
-        "text": "=Ты получаешь JSON-снимок датчиков (до 15+ полей) и таблицу порогов.\n\n**Данные:**\n{{ JSON.stringify($json.sensorPayload, null, 2) }}\n\n**Пороги / номиналы:**\n{{ JSON.stringify($json.thresholds, null, 2) }}\n\n**Оборудование:** {{ $json.meta.equipment }} | {{ $json.meta.refrigerant }} | {{ $json.meta.coolant }} | {{ $json.meta.ex_marking }}\n\nВерни один JSON-объект (без markdown), строго в формате плана:\n{\"status\":\"normal|warning|critical\",\"alert_level\":\"info|warning|critical\",\"problem\":\"\",\"details\":\"\",\"action\":{\"target\":\"ventilation|chiller|alarm|none\",\"command\":\"\",\"parameters\":{}},\"message\":\"текст для Telegram\"}\nТакже продублируй severity тем же смыслом что и status (для совместимости).",
+        "text": "=Ты получаешь JSON-снимок датчиков (до 15+ полей) и таблицу порогов.\n\n**Данные:**\n{{ JSON.stringify($json.sensorPayload, null, 2) }}\n\n**Пороги / номиналы:**\n{{ JSON.stringify($json.thresholds, null, 2) }}\n\n**Оборудование:** {{ $json.meta.equipment }} | {{ $json.meta.refrigerant }} | {{ $json.meta.coolant }} | {{ $json.meta.ex_marking }}\n\n**Предоценка правилами (минимум такой уровень):** {{ $json.ruleSeverity }} — {{ $json.ruleSummary }}\n\nВерни один JSON-объект (без markdown), строго в формате плана:\n{\"status\":\"normal|warning|critical\",\"alert_level\":\"info|warning|critical\",\"problem\":\"\",\"details\":\"\",\"action\":{\"target\":\"ventilation|chiller|alarm|none\",\"command\":\"\",\"parameters\":{}},\"message\":\"текст для Telegram\"}\nТакже продублируй severity тем же смыслом что и status (для совместимости).",
         "options": {
           "systemMessage": "Ты — AI-контроллер ОВК производственного цеха нитроаммофоски. Объект: цех NPK, категория помещения Б, категория работ IIб по СанПиН 1.2.3685-21. Оборудование: КУЛТЕК CTK CH SL34M Ex, хладагент R22 (заправка 2200 кг), охлаждаемая среда — 20% водный раствор аммиака, компрессор центробежный 1000 кВт, холодопроизводительность 2700 кВт при t исп −7.5°C / t конд +40°C, маркировка 1 Ex d IIB T4. Нормы микроклимата: СанПиН 1.2.3685-21 табл. 5.2 IIб; CO2 норма <1000 ppm (ГОСТ 30494-2011); R22/чиллер — номиналы и аварии по порогам из входного JSON (P всас/нагн, перегрев, T нагн/масла, расход хладоносителя и др.). Ответ только валидным JSON как в пользовательском сообщении; при превышении нормы укажи документ (СанПиН/ГОСТ) в details."
         }
@@ -102,14 +120,17 @@
       "name": "AI Agent HVAC",
       "type": "@n8n/n8n-nodes-langchain.agent",
       "typeVersion": 1.7,
-      "position": [-200, 220]
+      "position": [
+        -200,
+        220
+      ]
     },
     {
       "parameters": {
         "model": {
           "__rl": true,
           "mode": "list",
-          "value": "gpt-4o"
+          "value": "gpt-4o-mini"
         },
         "options": {
           "temperature": 0.2
@@ -119,7 +140,10 @@
       "name": "OpenAI Chat Model",
       "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
       "typeVersion": 1.2,
-      "position": [-200, 440],
+      "position": [
+        -200,
+        440
+      ],
       "credentials": {
         "openAiApi": {
           "name": "OpenAI API"
@@ -134,7 +158,10 @@
       "name": "Разбор ответа AI",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [80, 220]
+      "position": [
+        80,
+        220
+      ]
     },
     {
       "parameters": {
@@ -142,14 +169,17 @@
         "operation": "executeQuery",
         "query": "INSERT INTO ai_decisions (input_data, ai_response, status, model_used) VALUES ($1::jsonb, $2::jsonb, $3::text, $4::text)",
         "options": {
-          "queryReplacement": "={{ [ JSON.stringify({ sensorPayload: $('Разбор MQTT + пороги').first().json.sensorPayload, thresholds: $('Разбор MQTT + пороги').first().json.thresholds, meta: $('Разбор MQTT + пороги').first().json.meta, topic: $('Разбор MQTT + пороги').first().json.topic, receivedAt: $('Разбор MQTT + пороги').first().json.receivedAt }), JSON.stringify($json.analysis), String($json.analysis.severity || $json.analysis.status || $json.routeSeverity || 'normal'), 'gpt-4o' ] }}"
+          "queryReplacement": "={{ [ JSON.stringify({ sensorPayload: $('Разбор MQTT + пороги').first().json.sensorPayload, thresholds: $('Разбор MQTT + пороги').first().json.thresholds, meta: $('Разбор MQTT + пороги').first().json.meta, topic: $('Разбор MQTT + пороги').first().json.topic, receivedAt: $('Разбор MQTT + пороги').first().json.receivedAt }), JSON.stringify($json.analysis), String($json.analysis.severity || $json.analysis.status || $json.routeSeverity || 'normal'), 'gpt-4o-mini' ] }}"
         }
       },
       "id": "node-pg-ai-decisions",
       "name": "PostgreSQL ai_decisions",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
-      "position": [80, 40],
+      "position": [
+        80,
+        40
+      ],
       "credentials": {
         "postgres": {
           "name": "Postgres TimescaleDB"
@@ -162,20 +192,29 @@
           "values": [
             {
               "conditions": {
-                "options": { "caseSensitive": false, "typeValidation": "loose" },
+                "options": {
+                  "caseSensitive": false,
+                  "typeValidation": "loose"
+                },
                 "combinator": "or",
                 "conditions": [
                   {
                     "id": "c1",
                     "leftValue": "={{ $json.routeSeverity }}",
                     "rightValue": "critical",
-                    "operator": { "type": "string", "operation": "equals" }
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
                   },
                   {
                     "id": "c2",
                     "leftValue": "={{ $json.alertLevel }}",
                     "rightValue": "critical",
-                    "operator": { "type": "string", "operation": "equals" }
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
                   }
                 ]
               },
@@ -184,20 +223,29 @@
             },
             {
               "conditions": {
-                "options": { "caseSensitive": false, "typeValidation": "loose" },
+                "options": {
+                  "caseSensitive": false,
+                  "typeValidation": "loose"
+                },
                 "combinator": "or",
                 "conditions": [
                   {
                     "id": "w1",
                     "leftValue": "={{ $json.routeSeverity }}",
                     "rightValue": "warning",
-                    "operator": { "type": "string", "operation": "equals" }
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
                   },
                   {
                     "id": "w2",
                     "leftValue": "={{ $json.alertLevel }}",
                     "rightValue": "warning",
-                    "operator": { "type": "string", "operation": "equals" }
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
                   }
                 ]
               },
@@ -206,13 +254,18 @@
             }
           ]
         },
-        "options": { "fallbackOutput": "extra" }
+        "options": {
+          "fallbackOutput": "extra"
+        }
       },
       "id": "node-switch",
       "name": "Маршрут severity",
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3.2,
-      "position": [320, 220]
+      "position": [
+        320,
+        220
+      ]
     },
     {
       "parameters": {
@@ -226,7 +279,10 @@
       "name": "Telegram CRITICAL",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
-      "position": [580, 40],
+      "position": [
+        580,
+        40
+      ],
       "credentials": {
         "telegramApi": {
           "name": "Telegram Bot"
@@ -245,7 +301,10 @@
       "name": "Telegram WARNING",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
-      "position": [580, 220],
+      "position": [
+        580,
+        220
+      ],
       "credentials": {
         "telegramApi": {
           "name": "Telegram Bot"
@@ -266,7 +325,10 @@
       "name": "Telegram INFO",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
-      "position": [580, 400],
+      "position": [
+        580,
+        400
+      ],
       "credentials": {
         "telegramApi": {
           "name": "Telegram Bot"
@@ -284,59 +346,166 @@
       "name": "MQTT команда",
       "type": "n8n-nodes-base.mqtt",
       "typeVersion": 1,
-      "position": [760, 260],
+      "position": [
+        760,
+        260
+      ],
       "credentials": {
         "mqtt": {
           "name": "MQTT Mosquitto"
         }
       }
+    },
+    {
+      "parameters": {
+        "jsCode": "const j = $input.first().json;\nif (j.parseError) return [];\nif (j.ruleSeverity === 'normal' || !j.ruleSeverity) return [];\nreturn $input.all();"
+      },
+      "id": "node-gate-ai-rules",
+      "name": "К AI только при отклонении",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -430,
+        220
+      ]
     }
   ],
   "connections": {
     "MQTT Trigger": {
-      "main": [[{ "node": "Разбор MQTT + пороги", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Разбор MQTT + пороги",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Разбор MQTT + пороги": {
       "main": [
         [
-          { "node": "Развернуть сенсоры в строки БД", "type": "main", "index": 0 },
-          { "node": "Окно 30 сек для AI", "type": "main", "index": 0 }
+          {
+            "node": "Развернуть сенсоры в строки БД",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "К AI только при отклонении",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
     "Развернуть сенсоры в строки БД": {
-      "main": [[{ "node": "PostgreSQL sensor_readings", "type": "main", "index": 0 }]]
-    },
-    "Окно 30 сек для AI": {
-      "main": [[{ "node": "AI Agent HVAC", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "PostgreSQL sensor_readings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "AI Agent HVAC": {
-      "main": [[{ "node": "Разбор ответа AI", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Разбор ответа AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "OpenAI Chat Model": {
-      "ai_languageModel": [[{ "node": "AI Agent HVAC", "type": "ai_languageModel", "index": 0 }]]
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent HVAC",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Разбор ответа AI": {
       "main": [
         [
-          { "node": "PostgreSQL ai_decisions", "type": "main", "index": 0 },
-          { "node": "Маршрут severity", "type": "main", "index": 0 }
+          {
+            "node": "PostgreSQL ai_decisions",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Маршрут severity",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
     "Маршрут severity": {
       "main": [
         [
-          { "node": "Telegram CRITICAL", "type": "main", "index": 0 },
-          { "node": "MQTT команда", "type": "main", "index": 0 }
+          {
+            "node": "Telegram CRITICAL",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "MQTT команда",
+            "type": "main",
+            "index": 0
+          }
         ],
         [
-          { "node": "Telegram WARNING", "type": "main", "index": 0 },
-          { "node": "MQTT команда", "type": "main", "index": 0 }
+          {
+            "node": "Telegram WARNING",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "MQTT команда",
+            "type": "main",
+            "index": 0
+          }
         ],
         [
-          { "node": "Telegram INFO", "type": "main", "index": 0 },
-          { "node": "MQTT команда", "type": "main", "index": 0 }
+          {
+            "node": "Telegram INFO",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "MQTT команда",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "К AI только при отклонении": {
+      "main": [
+        [
+          {
+            "node": "Окно 120 сек для AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Окно 120 сек для AI": {
+      "main": [
+        [
+          {
+            "node": "AI Agent HVAC",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     }

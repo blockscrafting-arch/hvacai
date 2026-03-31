@@ -122,7 +122,8 @@ services:
       MQTT_HOST: mosquitto
       MQTT_PORT: "1883"
       MQTT_TOPIC: hvac/snapshot
-      PUBLISH_INTERVAL_SEC: "5"
+      # Реже публикации → меньше шумных MQTT-прогонов (AI вызывается только при отклонениях по правилам)
+      PUBLISH_INTERVAL_SEC: "30"
     networks:
       - hvac-net
 

@@ -59,7 +59,7 @@ def table_panel(pid: int, title: str, y: int, sql: str, h: int = 10) -> dict:
     }
 
 
-def main() -> None:
+def build_dashboard() -> dict:
     panels: list = []
     pid = 1
     y = 0
@@ -313,7 +313,7 @@ LIMIT 100"""
 
     panels.append(table_panel(pid, "Таблица alerts (если workflow пишет)", y, sql_alerts, h=8))
 
-    dashboard = {
+    return {
         "uid": "hvac",
         "title": "HVAC — цех нитроаммофоски",
         "description": "Provisioning: sensor_readings + ai_decisions + alerts",
@@ -332,11 +332,14 @@ LIMIT 100"""
         "panels": panels,
     }
 
+
+def main() -> None:
+    dashboard = build_dashboard()
     root = Path(__file__).resolve().parents[1]
     out = root / "grafana" / "provisioning" / "dashboards" / "hvac.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(dashboard, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"Wrote {out} ({len(panels)} panels)")
+    print(f"Wrote {out} ({len(dashboard['panels'])} panels)")
 
 
 if __name__ == "__main__":
