@@ -55,6 +55,8 @@ services:
       # За Caddy один hop; без прокси в .env можно задать 0
       N8N_PROXY_HOPS: ${N8N_PROXY_HOPS:-1}
       N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?set N8N_ENCRYPTION_KEY in .env (openssl rand -hex 32)}
+      # n8n 2.x: при true выражения {{ $env.* }} в нодах дают "access to env vars denied"
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
       # Ссылка в Telegram: должен быть тот же хост, что у заказчика в браузере (не 127.0.0.1 с телефона)
       GRAFANA_URL: ${GRAFANA_URL:-http://127.0.0.1:3000/d/hvac}
