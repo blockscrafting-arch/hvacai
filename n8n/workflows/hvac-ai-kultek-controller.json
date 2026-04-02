@@ -152,7 +152,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const item = $input.first().json;\nconst base = $('Разбор MQTT + пороги').first().json;\nlet text = item.output ?? item.text ?? '';\nif (typeof text !== 'string') text = JSON.stringify(text);\n\nlet analysis;\ntry {\n  const m = text.match(/\\{[\\s\\S]*\\}/);\n  analysis = m ? JSON.parse(m[0]) : {\n    status: 'normal',\n    severity: 'normal',\n    alert_level: 'info',\n    problem: 'no-json',\n    details: text,\n    message: text.substring(0, 500),\n  };\n} catch (e) {\n  analysis = {\n    status: 'normal',\n    severity: 'normal',\n    alert_level: 'info',\n    problem: 'parse-error',\n    details: String(e),\n    message: text.substring(0, 500),\n  };\n}\n\nconst sev = String(analysis.severity || analysis.status || 'normal').toLowerCase();\nif (!analysis.severity && analysis.status) analysis.severity = analysis.status;\nconst al = String(analysis.alert_level || 'info').toLowerCase();\nconst routeSeverity = sev === 'critical' || al === 'critical' ? 'critical' : sev === 'warning' || al === 'warning' ? 'warning' : 'normal';\n\nreturn [{ json: { ...base, analysis, routeSeverity, alertLevel: al } }];"
+        "jsCode": "const item = $input.first().json;\nconst base = $('Разбор MQTT + пороги').first().json;\nlet text = item.output ?? item.text ?? '';\nif (typeof text !== 'string') text = JSON.stringify(text);\n\nfunction escapeHtml(s) {\n  if (typeof s !== 'string') s = String(s ?? '');\n  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n}\n\nlet analysis;\ntry {\n  const m = text.match(/\\{[\\s\\S]*\\}/);\n  analysis = m ? JSON.parse(m[0]) : {\n    status: 'normal',\n    severity: 'normal',\n    alert_level: 'info',\n    problem: 'no-json',\n    details: text,\n    message: text.substring(0, 500),\n  };\n} catch (e) {\n  analysis = {\n    status: 'normal',\n    severity: 'normal',\n    alert_level: 'info',\n    problem: 'parse-error',\n    details: String(e),\n    message: text.substring(0, 500),\n  };\n}\n\nanalysis.message = escapeHtml(analysis.message || '').substring(0, 800);\nanalysis.details = escapeHtml(analysis.details || '').substring(0, 800);\n\nconst sev = String(analysis.severity || analysis.status || 'normal').toLowerCase();\nif (!analysis.severity && analysis.status) analysis.severity = analysis.status;\nconst al = String(analysis.alert_level || 'info').toLowerCase();\nconst routeSeverity = sev === 'critical' || al === 'critical' ? 'critical' : sev === 'warning' || al === 'warning' ? 'warning' : 'normal';\n\nreturn [{ json: { ...base, analysis, routeSeverity, alertLevel: al } }];"
       },
       "id": "node-parse-ai",
       "name": "Разбор ответа AI",
@@ -272,8 +272,10 @@
         "resource": "message",
         "operation": "sendMessage",
         "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
-        "text": "=🔴 CRITICAL — Цех нитроаммофоски\n\n{{ $json.analysis.message }}\n\n{{ $json.analysis.details }}\n\nТопик: {{ $json.topic }}\n📈 Grafana: {{ $env.GRAFANA_URL || 'http://localhost:3000/d/hvac' }}",
-        "additionalFields": {}
+        "text": "=🔴 <b>CRITICAL</b> — Цех нитроаммофоски\n\n{{ $json.analysis.message }}\n\n{{ $json.analysis.details }}\n\nТопик: {{ $json.topic }}\n📈 Grafana: {{ $env.GRAFANA_URL || 'http://localhost:3000/d/hvac' }}",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        }
       },
       "id": "node-tg-crit",
       "name": "Telegram CRITICAL",
@@ -294,8 +296,10 @@
         "resource": "message",
         "operation": "sendMessage",
         "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
-        "text": "=🟡 WARNING — Цех нитроаммофоски\n\n{{ $json.analysis.message }}\n\n{{ $json.analysis.details }}\n📈 Grafana: {{ $env.GRAFANA_URL || 'http://localhost:3000/d/hvac' }}",
-        "additionalFields": {}
+        "text": "=🟡 <b>WARNING</b> — Цех нитроаммофоски\n\n{{ $json.analysis.message }}\n\n{{ $json.analysis.details }}\n📈 Grafana: {{ $env.GRAFANA_URL || 'http://localhost:3000/d/hvac' }}",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        }
       },
       "id": "node-tg-warn",
       "name": "Telegram WARNING",
@@ -316,9 +320,10 @@
         "resource": "message",
         "operation": "sendMessage",
         "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
-        "text": "=🟢 INFO — Цех нитроаммофоски\n\n{{ $json.analysis.message }}\n\n{{ $json.analysis.details }}\n📈 Grafana: {{ $env.GRAFANA_URL || 'http://localhost:3000/d/hvac' }}",
+        "text": "=🟢 <b>INFO</b> — Цех нитроаммофоски\n\n{{ $json.analysis.message }}\n\n{{ $json.analysis.details }}\n📈 Grafana: {{ $env.GRAFANA_URL || 'http://localhost:3000/d/hvac' }}",
         "additionalFields": {
-          "disable_notification": true
+          "disable_notification": true,
+          "parse_mode": "HTML"
         }
       },
       "id": "node-tg-info",
